@@ -2,7 +2,7 @@ name: treponema-pallidum
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults
 
 dependencies:
   # ---- Core languages ----
