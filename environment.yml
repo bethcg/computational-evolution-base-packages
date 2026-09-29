@@ -1,0 +1,44 @@
+name: treponema-pallidum
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # ---- Core languages ----
+  - python=3.8
+  - r-base=4.0
+
+  # ---- Command-line bioinformatics tools (used by the README workflow) ----
+  - snp-sites            # SNP extraction (`snp-sites -o/-C ...`)
+  - raxml=8.2.13          # maximum-likelihood tree inference (classic RAxML, e.g. raxmlHPC-PTHREADS-SSE3)
+  - beast2=2.6.3           # molecular clock dating (README pins "BEAST v2.6")
+
+  # ---- Python packages (scripts/processdata.py, fasta2nexus.py, MakeBEASTXML.py, beastutils.py) ----
+  - biopython=1.77        # PINNED <1.78: fasta2nexus.py uses the removed `Bio.Alphabet.generic_dna` API
+  - numpy
+  - scipy                 # scipy.stats.norm, used in fasta2nexus.py
+  - pyyaml                # `import yaml`, used in MakeBEASTXML.py (not listed in the README, found by reading the code)
+
+  # ---- R / Bioconductor packages (scripts/*.R, reports/*.Rmd) ----
+  - r-ape
+  - r-phangorn
+  - r-phytools
+  - bioconductor-ggtree
+  - bioconductor-treeio
+  - r-tidytree            # used directly in reports/*.Rmd via tidytree:: (not in the README's list)
+  - r-ggplot2
+  - r-ggpubr
+  - r-ggsci
+  - r-coda
+  - r-cowplot
+  - r-rcolorbrewer        # used via RColorBrewer:: in reports/*.Rmd
+  - r-scales               # used via scales:: in reports/*.Rmd
+  - r-rmarkdown            # to render the reports/*.Rmd notebooks
+  - r-knitr
+  - pandoc                 # required by rmarkdown for the "github_document" reports
+
+  # Optional — only needed to render reports/Figures-D-pdf.Rmd (output: pdf_document).
+  # All other reports use output: github_document, which does not need LaTeX.
+  # Uncomment if you need that one PDF report; it's a large install:
+  # - r-tinytex
