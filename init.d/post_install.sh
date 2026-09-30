@@ -3,72 +3,78 @@
 # post_install.sh
 #
 # Post-install steps for the Treponema_pallidum_in_early_modern_Europe
-# environment (see environment.yml). Installs the two dependencies that
-# cannot be expressed in environment.yml because they aren't on
-# conda-forge or bioconda:
+# environment (see environment.yml). Installs the two R dependencies that
+# are not on conda-forge or bioconda:
 #
-#   1. beastio  — custom R package (BEAST2 log parsing), GitHub-only,
-#                 pinned to the commit the repo's README specifies.
-#   2. treedater — CRAN package, used directly in reports/*.Rmd, but not
-#                  currently packaged for conda.
+#   1. beastio   — custom R package (BEAST2 log parsing), GitHub-only,
+#                  pinned to the commit the repo's README specifies.
+#   2. treedater — CRAN package, used in reports/*.Rmd.
 #
-# Usage:
-#   conda env create -f environment.yml
-#   ./post_install.sh                       # uses the default env name below
-#   ./post_install.sh other-env-name        # or pass a different env name
+# Works in three situations:
+#   - a named conda env on a laptop:  ./post_install.sh treponema-pallidum
+#   - an already-active env:          ./post_install.sh
+#   - a RenkuLab session (any frontend: Python/Jupyter, RStudio, VS Code),
+#     where the env is built by Renku, has no name, and `conda` may be absent.
 #
-set -euo pipefail
-
-ENV_NAME="${1:-treponema-pallidum}"
+set -eo pipefail   # no `set -u`: conda activation scripts reference unset variables
+ 
+ENV_NAME="${1:-}"
 BEASTIO_COMMIT="b18caa6"
 BEASTIO_REPO="laduplessis/beastio"
-
-echo "==> Post-install for conda environment: ${ENV_NAME}"
-
-# --- Locate and activate the conda environment -----------------------------
-if ! command -v conda >/dev/null 2>&1; then
-  echo "ERROR: conda was not found on PATH. Activate/install conda first." >&2
-  exit 1
+CRAN="https://cloud.r-project.org"
+ 
+log() { echo "==> $*"; }
+die() { echo "ERROR: $*" >&2; exit 1; }
+ 
+# --- 1. Activate a named env only if one was requested and conda exists ----
+if [[ -n "$ENV_NAME" ]]; then
+  command -v conda >/dev/null 2>&1 || die "conda not found, but env '$ENV_NAME' was requested."
+  # shellcheck source=/dev/null
+  source "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate "$ENV_NAME" || die "could not activate conda env '$ENV_NAME'."
 fi
-
-CONDA_BASE="$(conda info --base)"
-# shellcheck source=/dev/null
-source "${CONDA_BASE}/etc/profile.d/conda.sh"
-
-if ! conda env list | awk '{print $1}' | grep -qx "${ENV_NAME}"; then
-  echo "ERROR: conda environment '${ENV_NAME}' does not exist." >&2
-  echo "       Create it first: conda env create -f environment.yml" >&2
-  exit 1
+ 
+# --- 2. Find R (whatever is on PATH: conda env, Renku layer, or system) ----
+command -v Rscript >/dev/null 2>&1 || die "Rscript not found on PATH.
+       In RenkuLab, make sure environment.yml lists r-base (and r-essentials
+       if you want the usual packages); the Python frontend does not add R."
+log "Using R: $(command -v Rscript)  ($(R --version | head -n1))"
+ 
+# --- 3. Make sure packages go into a writable library ----------------------
+# Renku installs the environment into a read-only image layer at runtime,
+# so fall back to a user library when the default one is not writable.
+LIB="$(Rscript -e 'cat(.libPaths()[1])')"
+if [[ ! -w "$LIB" ]]; then
+  LIB="${RENKU_MOUNT_DIR:-$HOME}/R/library"
+  mkdir -p "$LIB"
+  export R_LIBS_USER="$LIB"
+  log "Default R library is read-only; installing into $LIB"
+  log "Add this line to ~/.Renviron so R finds it later:  R_LIBS_USER=$LIB"
+  grep -qxF "R_LIBS_USER=$LIB" "$HOME/.Renviron" 2>/dev/null || echo "R_LIBS_USER=$LIB" >> "$HOME/.Renviron"
 fi
-
-conda activate "${ENV_NAME}"
-echo "==> Activated ${ENV_NAME} (R: $(R --version | head -n1))"
-
-# --- 1. r-remotes (needed to install beastio from GitHub) ------------------
-echo "==> Ensuring r-remotes is installed..."
-if ! Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) quit(status = 1)' >/dev/null 2>&1; then
-  conda install -n "${ENV_NAME}" -y -c conda-forge r-remotes
-fi
-
-# --- 2. beastio, pinned to the commit the README specifies ------------------
-echo "==> Installing beastio (${BEASTIO_REPO}@${BEASTIO_COMMIT})..."
-Rscript -e "remotes::install_github('${BEASTIO_REPO}', ref = '${BEASTIO_COMMIT}', upgrade = 'never')"
-
-# --- 3. treedater, from CRAN (not packaged for conda) -----------------------
-echo "==> Installing treedater from CRAN..."
-Rscript -e 'install.packages("treedater", repos = "https://cloud.r-project.org", dependencies = TRUE)'
-
-# --- Verify both installed correctly ----------------------------------------
-echo "==> Verifying installation..."
-Rscript -e '
+export R_POST_LIB="$LIB"
+ 
+# --- 4. Install remotes, beastio and treedater -----------------------------
+log "Installing remotes, beastio@${BEASTIO_COMMIT} and treedater..."
+Rscript - <<EOF
+lib <- Sys.getenv("R_POST_LIB")
+.libPaths(c(lib, .libPaths()))
+options(repos = c(CRAN = "${CRAN}"))
+ 
+if (!requireNamespace("remotes", quietly = TRUE))
+  install.packages("remotes", lib = lib)
+ 
+remotes::install_github("${BEASTIO_REPO}", ref = "${BEASTIO_COMMIT}",
+                        upgrade = "never", dependencies = TRUE)
+ 
+if (!requireNamespace("treedater", quietly = TRUE))
+  install.packages("treedater", lib = lib, dependencies = TRUE)
+ 
 pkgs <- c("beastio", "treedater")
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing) > 0) {
-  stop("Failed to install: ", paste(missing, collapse = ", "))
-}
+if (length(missing) > 0) stop("Failed to install: ", paste(missing, collapse = ", "))
 cat("OK: beastio", as.character(packageVersion("beastio")),
-    "and treedater", as.character(packageVersion("treedater")),
-    "are both installed.\n")
-'
-
-echo "==> Post-install complete. Environment '${ENV_NAME}' is ready."
+    "and treedater", as.character(packageVersion("treedater")), "installed in", lib, "\n")
+EOF
+ 
+log "Post-install complete."
